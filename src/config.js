@@ -9,6 +9,7 @@ module.exports = {
   aiProvider: (process.env.AI_PROVIDER || "openai").toLowerCase(),
   openaiApiKey: process.env.OPENAI_API_KEY,
   openaiModel: process.env.OPENAI_MODEL || "gpt-4o-mini",
+  aiFallbackOnQuota: process.env.AI_FALLBACK_ON_QUOTA !== "false",
   hfApiKey: process.env.HF_API_KEY,
   hfModel: process.env.HF_MODEL,
   ollamaBaseUrl: process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434",

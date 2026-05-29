@@ -38,24 +38,51 @@ function parseInsight(raw) {
   return { reasoning: parsed.reasoning, sentiment: parsed.sentiment };
 }
 
-function openAiError(err) {
-  const status = err?.status || 502;
+function isQuotaError(err) {
+  const status = err?.status;
   const code = err?.code || err?.error?.code;
+  return status === 429 || code === "insufficient_quota";
+}
 
-  if (status === 429 || code === "insufficient_quota") {
+function rulesInsightFromToken(token) {
+  const name = token?.name || token?.id || "Token";
+  const symbol = (token?.symbol || "").toUpperCase();
+  const price = token?.market_data?.current_price_usd;
+  const change = token?.market_data?.price_change_percentage_24h ?? 0;
+  const volume = token?.market_data?.total_volume_usd;
+  const cap = token?.market_data?.market_cap_usd;
+
+  let sentiment = "Neutral";
+  if (change > 2) {
+    sentiment = "Bullish";
+  } else if (change < -2) {
+    sentiment = "Bearish";
+  }
+
+  const reasoning =
+    `${name} (${symbol}) trades around $${price ?? "n/a"} with a 24h change of ` +
+    `${change?.toFixed?.(2) ?? change}%. Market cap is $${cap ?? "n/a"} and 24h volume is ` +
+    `$${volume ?? "n/a"}. Short-term tone looks ${sentiment.toLowerCase()} based on recent price action.`;
+
+  return { reasoning, sentiment };
+}
+
+function openAiError(err) {
+  if (isQuotaError(err)) {
     const e = new Error(
-      "OpenAI rate limit or no quota (429). Check billing at platform.openai.com or use AI_PROVIDER=ollama."
+      "OpenAI rate limit or no quota (429). Add billing at platform.openai.com, install Ollama (AI_PROVIDER=ollama), or set AI_FALLBACK_ON_QUOTA=true."
     );
     e.status = 502;
+    e.isQuota = true;
     return e;
   }
 
   const e = new Error(err?.message || "OpenAI request failed");
-  e.status = status >= 400 && status < 600 ? 502 : 502;
+  e.status = 502;
   return e;
 }
 
-async function callOpenAI(prompt) {
+async function callOpenAI(prompt, token) {
   if (!config.openaiApiKey) {
     const err = new Error("OPENAI_API_KEY not set in .env");
     err.status = 503;
@@ -64,29 +91,37 @@ async function callOpenAI(prompt) {
 
   const openai = getOpenAIClient();
 
-  try {
-    const result = await openai.responses.create({
-      model: config.openaiModel,
-      input: prompt,
-      store: false,
-    });
+  const tryModels = [
+    config.openaiModel,
+    "gpt-4o-mini",
+    "gpt-4o",
+  ].filter((m, i, arr) => m && arr.indexOf(m) === i);
 
-    const content = result?.output_text || "";
+  let lastErr;
 
-    return {
-      insight: parseInsight(content),
-      model: { provider: "openai", model: config.openaiModel },
-    };
-  } catch (err) {
-    const useChatFallback =
-      err?.status === 404 ||
-      err?.code === "model_not_found" ||
-      /model/i.test(err?.message || "");
+  for (const model of tryModels) {
+    try {
+      const result = await openai.responses.create({
+        model,
+        input: prompt,
+        store: false,
+      });
 
-    if (!useChatFallback) {
-      throw openAiError(err);
+      const content = result?.output_text || "";
+
+      return {
+        insight: parseInsight(content),
+        model: { provider: "openai", model },
+      };
+    } catch (err) {
+      lastErr = err;
+      if (isQuotaError(err)) {
+        break;
+      }
     }
+  }
 
+  if (!lastErr || !isQuotaError(lastErr)) {
     try {
       const chat = await openai.chat.completions.create({
         model: "gpt-4o-mini",
@@ -99,10 +134,22 @@ async function callOpenAI(prompt) {
         insight: parseInsight(content),
         model: { provider: "openai", model: "gpt-4o-mini" },
       };
-    } catch (fallbackErr) {
-      throw openAiError(fallbackErr);
+    } catch (chatErr) {
+      lastErr = chatErr;
     }
   }
+
+  if (config.aiFallbackOnQuota && token) {
+    return {
+      insight: rulesInsightFromToken(token),
+      model: {
+        provider: "local-fallback",
+        model: "market-data-rules",
+      },
+    };
+  }
+
+  throw openAiError(lastErr);
 }
 
 async function callHuggingFace(prompt) {
@@ -179,7 +226,12 @@ async function getInsight(token, chartPoints) {
   if (provider === "ollama") {
     return callOllama(prompt);
   }
-  return callOpenAI(prompt);
+  return callOpenAI(prompt, token);
 }
 
-module.exports = { getInsight, buildPrompt, parseInsight };
+module.exports = {
+  getInsight,
+  buildPrompt,
+  parseInsight,
+  rulesInsightFromToken,
+};
