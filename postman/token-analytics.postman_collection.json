@@ -1,0 +1,47 @@
+{
+  "info": {
+    "name": "Token Analytics API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "wallet", "value": "0x0000000000000000000000000000000000000001" },
+    { "key": "tokenId", "value": "bitcoin" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/health"
+      }
+    },
+    {
+      "name": "Token Insight",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"vs_currency\": \"usd\",\n  \"history_days\": 30\n}"
+        },
+        "url": "{{baseUrl}}/api/token/{{tokenId}}/insight"
+      }
+    },
+    {
+      "name": "HyperLiquid Daily PnL",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/api/hyperliquid/{{wallet}}/pnl?start=2025-08-01&end=2025-08-07",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "hyperliquid", "{{wallet}}", "pnl"],
+          "query": [
+            { "key": "start", "value": "2025-08-01" },
+            { "key": "end", "value": "2025-08-07" }
+          ]
+        }
+      }
+    }
+  ]
+}
