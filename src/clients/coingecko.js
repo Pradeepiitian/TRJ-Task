@@ -2,7 +2,10 @@ const config = require("../config");
 
 async function getCoin(id) {
   const url = `${config.coingeckoBaseUrl}/coins/${encodeURIComponent(id)}?localization=false&tickers=false&community_data=false&developer_data=false`;
-  const res = await fetch(url);
+  const res = await fetch(url, {
+    headers: { Accept: "application/json" },
+  });
+
   if (res.status === 404) {
     const err = new Error("Token not found");
     err.status = 404;
@@ -18,7 +21,10 @@ async function getCoin(id) {
 
 async function getMarketChart(id, vsCurrency, days) {
   const url = `${config.coingeckoBaseUrl}/coins/${encodeURIComponent(id)}/market_chart?vs_currency=${vsCurrency}&days=${days}`;
-  const res = await fetch(url);
+  const res = await fetch(url, {
+    headers: { Accept: "application/json" },
+  });
+
   if (!res.ok) {
     const err = new Error(`CoinGecko chart error: ${res.status}`);
     err.status = 502;

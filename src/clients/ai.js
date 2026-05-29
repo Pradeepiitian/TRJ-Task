@@ -1,4 +1,14 @@
+const OpenAI = require("openai");
 const config = require("../config");
+
+let openaiClient;
+
+function getOpenAIClient() {
+  if (!openaiClient) {
+    openaiClient = new OpenAI({ apiKey: config.openaiApiKey });
+  }
+  return openaiClient;
+}
 
 function buildPrompt(token, chartPoints) {
   const chartPart =
@@ -28,40 +38,71 @@ function parseInsight(raw) {
   return { reasoning: parsed.reasoning, sentiment: parsed.sentiment };
 }
 
+function openAiError(err) {
+  const status = err?.status || 502;
+  const code = err?.code || err?.error?.code;
+
+  if (status === 429 || code === "insufficient_quota") {
+    const e = new Error(
+      "OpenAI rate limit or no quota (429). Check billing at platform.openai.com or use AI_PROVIDER=ollama."
+    );
+    e.status = 502;
+    return e;
+  }
+
+  const e = new Error(err?.message || "OpenAI request failed");
+  e.status = status >= 400 && status < 600 ? 502 : 502;
+  return e;
+}
+
 async function callOpenAI(prompt) {
   if (!config.openaiApiKey) {
-    const err = new Error("OPENAI_API_KEY not set");
+    const err = new Error("OPENAI_API_KEY not set in .env");
     err.status = 503;
     throw err;
   }
 
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.openaiApiKey}`,
-    },
-    body: JSON.stringify({
+  const openai = getOpenAIClient();
+
+  try {
+    const result = await openai.responses.create({
       model: config.openaiModel,
-      messages: [{ role: "user", content: prompt }],
-      response_format: { type: "json_object" },
-      temperature: 0.3,
-    }),
-  });
+      input: prompt,
+      store: false,
+    });
 
-  if (!res.ok) {
-    const err = new Error(`OpenAI error: ${res.status}`);
-    err.status = 502;
-    throw err;
+    const content = result?.output_text || "";
+
+    return {
+      insight: parseInsight(content),
+      model: { provider: "openai", model: config.openaiModel },
+    };
+  } catch (err) {
+    const useChatFallback =
+      err?.status === 404 ||
+      err?.code === "model_not_found" ||
+      /model/i.test(err?.message || "");
+
+    if (!useChatFallback) {
+      throw openAiError(err);
+    }
+
+    try {
+      const chat = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        response_format: { type: "json_object" },
+        temperature: 0.3,
+      });
+      const content = chat?.choices?.[0]?.message?.content || "";
+      return {
+        insight: parseInsight(content),
+        model: { provider: "openai", model: "gpt-4o-mini" },
+      };
+    } catch (fallbackErr) {
+      throw openAiError(fallbackErr);
+    }
   }
-
-  const data = await res.json();
-  const content = data?.choices?.[0]?.message?.content;
-
-  return {
-    insight: parseInsight(content),
-    model: { provider: "openai", model: config.openaiModel },
-  };
 }
 
 async function callHuggingFace(prompt) {

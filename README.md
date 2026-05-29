@@ -51,26 +51,30 @@ npm run dev
 
 Copy `.env.example` to `.env`. **Never commit `.env`.**
 
-| Variable | Description |
-|----------|-------------|
-| `PORT` | Server port (default `3000`) |
-| `COINGECKO_BASE_URL` | `https://api.coingecko.com/api/v3` |
-| `HYPERLIQUID_INFO_URL` | `https://api.hyperliquid.xyz/info` |
-| `AI_PROVIDER` | `openai` (default), `huggingface`, or `ollama` |
-| `OPENAI_API_KEY` | Required when `AI_PROVIDER=openai` |
-| `OPENAI_MODEL` | e.g. `gpt-4o-mini` |
-| `HF_API_KEY` / `HF_MODEL` | For Hugging Face inference |
-| `OLLAMA_BASE_URL` / `OLLAMA_MODEL` | For local Ollama |
+| Variable | Description | Key required? |
+|----------|-------------|---------------|
+| `PORT` | Server port (default `3000`) | No |
+| `COINGECKO_BASE_URL` | `https://api.coingecko.com/api/v3` | **No** (free public API) |
+| `HYPERLIQUID_INFO_URL` | `https://api.hyperliquid.xyz/info` | **No** (public info endpoint) |
+| `AI_PROVIDER` | `openai`, `huggingface`, or `ollama` | — |
+| `OPENAI_API_KEY` | OpenAI key | **Yes** (if using OpenAI) |
+| `OPENAI_MODEL` | e.g. `gpt-4o-mini` | No |
+| `HF_API_KEY` / `HF_MODEL` | Hugging Face | **Yes** (if using HF) |
+| `OLLAMA_BASE_URL` / `OLLAMA_MODEL` | Local Ollama | No key (local) |
+
+**Only AI keys go in `.env`.** CoinGecko and HyperLiquid do not use API keys in this project.
 
 ### AI setup
 
-**OpenAI (default)**
+**OpenAI (default)** — uses official `openai` npm package and `responses.create`
 
 ```env
 AI_PROVIDER=openai
 OPENAI_API_KEY=sk-your-key
 OPENAI_MODEL=gpt-4o-mini
 ```
+
+Key and model go in `.env` only (never in source code).
 
 **Hugging Face**
 
