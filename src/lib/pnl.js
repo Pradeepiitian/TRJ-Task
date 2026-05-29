@@ -1,4 +1,5 @@
 const { eachUtcDay, dayEndMs, utcDateFromMs } = require("./dates");
+const { roundUsd, roundDailyRow, roundSummary } = require("./format");
 
 function num(v) {
   const n = parseFloat(v);
@@ -60,13 +61,19 @@ function emptyDay(date) {
   };
 }
 
+function filterFillsInRange(fills, startMs, endMs) {
+  return (fills || []).filter((f) => f?.time >= startMs && f?.time <= endMs);
+}
+
 async function buildDailyPnl({
   start,
   end,
-  fills,
+  startMs,
+  endMs,
+  fillsForPositions,
   fundingRows,
   getCandleClose,
-  initialEquity,
+  currentAccountValue,
 }) {
   const days = eachUtcDay(start, end);
   const dailyMap = {};
@@ -75,7 +82,9 @@ async function buildDailyPnl({
     dailyMap[d] = emptyDay(d);
   }
 
-  for (const fill of fills || []) {
+  const fillsInRange = filterFillsInRange(fillsForPositions, startMs, endMs);
+
+  for (const fill of fillsInRange) {
     const date = utcDateFromMs(fill?.time);
     if (!dailyMap[date]) {
       continue;
@@ -92,16 +101,16 @@ async function buildDailyPnl({
     dailyMap[date].funding_usd += num(row?.delta?.usdc);
   }
 
-  const sortedFills = [...(fills || [])].sort((a, b) => a.time - b.time);
+  const sortedFills = [...(fillsForPositions || [])].sort((a, b) => a.time - b.time);
   const positions = new Map();
   let fillIdx = 0;
   let prevUnrealized = 0;
   const closeCache = {};
 
   for (const date of days) {
-    const endMs = dayEndMs(date);
+    const endMsDay = dayEndMs(date);
 
-    while (fillIdx < sortedFills.length && sortedFills[fillIdx].time <= endMs) {
+    while (fillIdx < sortedFills.length && sortedFills[fillIdx].time <= endMsDay) {
       applyFillToPosition(positions, sortedFills[fillIdx]);
       fillIdx += 1;
     }
@@ -114,7 +123,7 @@ async function buildDailyPnl({
 
       const key = `${coin}:${date}`;
       if (closeCache[key] === undefined) {
-        closeCache[key] = await getCandleClose(coin, endMs);
+        closeCache[key] = await getCandleClose(coin, endMsDay);
       }
       marks[coin] = closeCache[key] ?? pos.entryPx;
     }
@@ -131,15 +140,9 @@ async function buildDailyPnl({
       row.funding_usd;
   }
 
-  let equity = initialEquity;
-  const daily = days.map((d) => {
-    equity += dailyMap[d].net_pnl_usd;
-    dailyMap[d].equity_usd = equity;
-    return dailyMap[d];
-  });
-
-  const summary = daily.reduce(
-    (acc, row) => {
+  const summary = days.reduce(
+    (acc, d) => {
+      const row = dailyMap[d];
       acc.total_realized_usd += row.realized_pnl_usd;
       acc.total_unrealized_usd += row.unrealized_pnl_usd;
       acc.total_fees_usd += row.fees_usd;
@@ -156,7 +159,25 @@ async function buildDailyPnl({
     }
   );
 
-  return { daily, summary };
+  const accountValue = num(currentAccountValue);
+  let equity =
+    accountValue > 0 ? accountValue - summary.net_pnl_usd : 0;
+
+  const daily = days.map((d) => {
+    equity += dailyMap[d].net_pnl_usd;
+    dailyMap[d].equity_usd = equity;
+    return roundDailyRow(dailyMap[d]);
+  });
+
+  return {
+    daily,
+    summary: roundSummary(summary),
+  };
 }
 
-module.exports = { buildDailyPnl, applyFillToPosition, num };
+module.exports = {
+  buildDailyPnl,
+  applyFillToPosition,
+  num,
+  filterFillsInRange,
+};

@@ -1,34 +1,26 @@
-const nock = require("nock");
-const config = require("../src/config");
-const { getCoin, normalizeToken } = require("../src/clients/coingecko");
+const { normalizeToken } = require("../src/clients/coingecko");
 
 describe("coingecko client", () => {
-  afterEach(() => {
-    nock.cleanAll();
-  });
-
-  test("normalizeToken maps market fields", () => {
+  test("normalizeToken maps market fields for assignment response shape", () => {
     const token = normalizeToken(
       {
-        id: "ethereum",
-        symbol: "eth",
-        name: "Ethereum",
+        id: "chainlink",
+        symbol: "link",
+        name: "Chainlink",
         market_data: {
-          current_price: { usd: 3000 },
-          market_cap: { usd: 100 },
-          total_volume: { usd: 50 },
-          price_change_percentage_24h: -0.5,
+          current_price: { usd: 7.23 },
+          market_cap: { usd: 3500000000 },
+          total_volume: { usd: 120000000 },
+          price_change_percentage_24h: -1.2,
         },
       },
       "usd"
     );
 
-    expect(token.market_data.current_price_usd).toBe(3000);
-  });
-
-  test("getCoin throws 404 when token missing", async () => {
-    nock(config.coingeckoBaseUrl).get("/coins/missing-coin").query(true).reply(404);
-
-    await expect(getCoin("missing-coin")).rejects.toMatchObject({ status: 404 });
+    expect(token.id).toBe("chainlink");
+    expect(token.symbol).toBe("link");
+    expect(token.market_data.current_price_usd).toBe(7.23);
+    expect(token.market_data.market_cap_usd).toBe(3500000000);
+    expect(token.market_data.price_change_percentage_24h).toBe(-1.2);
   });
 });

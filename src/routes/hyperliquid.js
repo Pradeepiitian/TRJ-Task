@@ -33,33 +33,61 @@ router.get("/:wallet/pnl", async (req, res) => {
       return res.status(400).json({ error: `Date range max ${MAX_DAYS} days` });
     }
 
-    const role = await hl.getUserRole(wallet);
+    let role;
+    try {
+      role = await hl.getUserRole(wallet);
+    } catch (err) {
+      return res.status(err?.status || 502).json({
+        error: err?.message || "HyperLiquid API error",
+      });
+    }
+
     if (role?.role === "missing") {
       return res.status(404).json({ error: "Wallet not found on HyperLiquid" });
     }
 
     const { startMs, endMs } = msRange(start, end);
 
-    const [fills, fundingRows, state] = await Promise.all([
-      hl.fetchAllFills(wallet, startMs, endMs),
-      hl.fetchFunding(wallet, startMs, endMs),
-      hl.getClearinghouseState(wallet).catch(() => null),
-    ]);
+    let fillsForPositions = [];
+    let fundingRows = [];
+    let accountValue = 0;
 
-    const initialEquity = parseFloat(
-      state?.marginSummary?.accountValue ??
-        state?.crossMarginSummary?.accountValue ??
-        0
-    );
+    try {
+      [fillsForPositions, fundingRows] = await Promise.all([
+        hl.fetchFillsForPositions(wallet, startMs, endMs),
+        hl.fetchFunding(wallet, startMs, endMs),
+      ]);
+
+      const state = await hl.getClearinghouseState(wallet);
+      accountValue = hl.getAccountValue(state);
+    } catch (err) {
+      return res.status(err?.status || 502).json({
+        error: err?.message || "Failed to fetch HyperLiquid data",
+      });
+    }
 
     const { daily, summary } = await buildDailyPnl({
       start,
       end,
-      fills,
+      startMs,
+      endMs,
+      fillsForPositions,
       fundingRows,
       getCandleClose: (coin, ms) => hl.getCandleClose(coin, ms),
-      initialEquity: Number.isFinite(initialEquity) ? initialEquity : 0,
+      currentAccountValue: accountValue,
     });
+
+    const notes = [
+      "PnL calculated using daily close prices.",
+      "UTC calendar days.",
+      "Realized PnL from closed trades (closedPnl on fills).",
+      "Unrealized PnL is day-over-day change in open position MTM.",
+      "Net PnL = realized + unrealized - fees + funding.",
+    ];
+
+    if (fillsForPositions.length === 0 && fundingRows.length === 0) {
+      notes.push("No fills or funding in range; daily rows are zeroed.");
+    }
 
     res.json({
       wallet,
@@ -70,8 +98,7 @@ router.get("/:wallet/pnl", async (req, res) => {
       diagnostics: {
         data_source: "hyperliquid_api",
         last_api_call: new Date().toISOString(),
-        notes:
-          "UTC calendar days. Realized/fees from fills; funding from userFunding; unrealized = daily change in MTM using 1d candle closes.",
+        notes: notes.join(" "),
       },
     });
   } catch (err) {

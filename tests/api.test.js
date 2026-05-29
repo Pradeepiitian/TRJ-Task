@@ -1,6 +1,4 @@
 const request = require("supertest");
-const nock = require("nock");
-const config = require("../src/config");
 
 jest.mock("../src/clients/ai", () => ({
   getInsight: jest.fn().mockResolvedValue({
@@ -9,13 +7,28 @@ jest.mock("../src/clients/ai", () => ({
   }),
 }));
 
+jest.mock("../src/clients/coingecko", () => {
+  const actual = jest.requireActual("../src/clients/coingecko");
+  return {
+    getCoin: jest.fn().mockResolvedValue({
+      id: "bitcoin",
+      symbol: "btc",
+      name: "Bitcoin",
+      market_data: {
+        current_price: { usd: 50000 },
+        market_cap: { usd: 1000000000 },
+        total_volume: { usd: 50000000 },
+        price_change_percentage_24h: 1.5,
+      },
+    }),
+    getMarketChart: jest.fn().mockResolvedValue({ prices: [[1, 49000]] }),
+    normalizeToken: actual.normalizeToken,
+  };
+});
+
 const app = require("../src/index");
 
 describe("API routes", () => {
-  afterEach(() => {
-    nock.cleanAll();
-  });
-
   test("GET /health", async () => {
     const res = await request(app).get("/health");
     expect(res.status).toBe(200);
@@ -38,28 +51,6 @@ describe("API routes", () => {
   });
 
   test("POST /api/token/:id/insight returns combined payload", async () => {
-    const coinBody = {
-      id: "bitcoin",
-      symbol: "btc",
-      name: "Bitcoin",
-      market_data: {
-        current_price: { usd: 50000 },
-        market_cap: { usd: 1000000000 },
-        total_volume: { usd: 50000000 },
-        price_change_percentage_24h: 1.5,
-      },
-    };
-
-    nock(config.coingeckoBaseUrl)
-      .get("/coins/bitcoin")
-      .query(true)
-      .reply(200, coinBody);
-
-    nock(config.coingeckoBaseUrl)
-      .get("/coins/bitcoin/market_chart")
-      .query(true)
-      .reply(200, { prices: [[1, 49000], [2, 50000]] });
-
     const res = await request(app)
       .post("/api/token/bitcoin/insight")
       .send({ vs_currency: "usd", history_days: 7 });

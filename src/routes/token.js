@@ -6,11 +6,29 @@ const router = express.Router();
 
 router.post("/:id/insight", async (req, res) => {
   try {
-    const id = req.params?.id;
-    const vsCurrency = (req.body?.vs_currency || "usd").toLowerCase();
-    const historyDays = Number(req.body?.history_days) || 30;
+    const id = (req.params?.id || "").trim().toLowerCase();
+    if (!id) {
+      return res.status(400).json({ error: "Token id is required" });
+    }
 
-    const raw = await coingecko.getCoin(id);
+    const vsCurrency = (req.body?.vs_currency || "usd").toLowerCase();
+    let historyDays = Number(req.body?.history_days);
+    if (!Number.isFinite(historyDays) || historyDays < 1) {
+      historyDays = 30;
+    }
+    if (historyDays > 365) {
+      historyDays = 365;
+    }
+
+    let raw;
+    try {
+      raw = await coingecko.getCoin(id);
+    } catch (err) {
+      return res.status(err?.status || 502).json({
+        error: err?.message || "CoinGecko request failed",
+      });
+    }
+
     const token = coingecko.normalizeToken(raw, vsCurrency);
 
     let chartPoints = [];
@@ -32,7 +50,9 @@ router.post("/:id/insight", async (req, res) => {
       if (err?.message === "Invalid insight shape") {
         return res.status(502).json({ error: "AI returned invalid JSON" });
       }
-      throw err;
+      return res.status(err?.status || 502).json({
+        error: err?.message || "AI request failed",
+      });
     }
 
     res.json({

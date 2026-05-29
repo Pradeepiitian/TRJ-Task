@@ -64,6 +64,44 @@ async function callOpenAI(prompt) {
   };
 }
 
+async function callHuggingFace(prompt) {
+  if (!config.hfApiKey || !config.hfModel) {
+    const err = new Error("HF_API_KEY and HF_MODEL must be set");
+    err.status = 503;
+    throw err;
+  }
+
+  const url = `https://api-inference.huggingface.co/models/${config.hfModel}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.hfApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      inputs: prompt,
+      parameters: { max_new_tokens: 400, return_full_text: false },
+    }),
+  });
+
+  if (!res.ok) {
+    const err = new Error(`Hugging Face error: ${res.status}`);
+    err.status = 502;
+    throw err;
+  }
+
+  const data = await res.json();
+  const text =
+    Array.isArray(data) && data[0]?.generated_text
+      ? data[0].generated_text
+      : data?.generated_text || JSON.stringify(data);
+
+  return {
+    insight: parseInsight(text),
+    model: { provider: "huggingface", model: config.hfModel },
+  };
+}
+
 async function callOllama(prompt) {
   const res = await fetch(`${config.ollamaBaseUrl}/api/chat`, {
     method: "POST",
@@ -92,11 +130,14 @@ async function callOllama(prompt) {
 
 async function getInsight(token, chartPoints) {
   const prompt = buildPrompt(token, chartPoints);
+  const provider = config.aiProvider;
 
-  if (config.aiProvider === "ollama") {
+  if (provider === "huggingface" || provider === "hf") {
+    return callHuggingFace(prompt);
+  }
+  if (provider === "ollama") {
     return callOllama(prompt);
   }
-
   return callOpenAI(prompt);
 }
 

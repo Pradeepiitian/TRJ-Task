@@ -1,72 +1,210 @@
-# Token Analytics API
+# Token Insight & Analytics API
 
-Node.js + Express backend for:
+Backend assignment implementation: **Node.js + Express**, **CoinGecko**, **HyperLiquid**, and **AI** (OpenAI / Hugging Face / Ollama).
 
-- **Token Insight** — CoinGecko data + AI summary (`POST /api/token/:id/insight`)
-- **HyperLiquid PnL** — daily realized/unrealized PnL (`GET /api/hyperliquid/:wallet/pnl`)
+## Deliverables checklist
 
-## Requirements
+| Requirement | Status |
+|-------------|--------|
+| GitHub repo with source | Yes |
+| README + Docker setup | Yes |
+| `POST /api/token/:id/insight` | Yes |
+| `GET /api/hyperliquid/:wallet/pnl` | Yes |
+| CoinGecko (no key) | Yes |
+| AI via `.env` (keys not committed) | Yes |
+| Postman collection | `postman/token-analytics.postman_collection.json` |
+| Unit tests | `npm test` |
 
-- Node.js 20+
-- Docker (optional)
-- OpenAI API key (or Ollama for local AI)
+---
 
-## Setup (local)
+## Quick start (Docker — preferred)
+
+```bash
+cp .env.example .env
+# Edit .env — set OPENAI_API_KEY (or another AI provider)
+
+docker compose up --build
+```
+
+API: http://localhost:3000
+
+---
+
+## Quick start (local)
+
+**Prerequisites:** Node.js 20+
 
 ```bash
 npm install
 cp .env.example .env
 ```
 
-Edit `.env` and set `OPENAI_API_KEY`.
+Edit `.env`, then:
 
 ```bash
 npm run dev
 ```
 
-Health check: `http://localhost:3000/health`
+---
 
-## Setup (Docker)
+## Environment variables
 
-```bash
-cp .env.example .env
-# edit .env
-docker compose up --build
+Copy `.env.example` to `.env`. **Never commit `.env`.**
+
+| Variable | Description |
+|----------|-------------|
+| `PORT` | Server port (default `3000`) |
+| `COINGECKO_BASE_URL` | `https://api.coingecko.com/api/v3` |
+| `HYPERLIQUID_INFO_URL` | `https://api.hyperliquid.xyz/info` |
+| `AI_PROVIDER` | `openai` (default), `huggingface`, or `ollama` |
+| `OPENAI_API_KEY` | Required when `AI_PROVIDER=openai` |
+| `OPENAI_MODEL` | e.g. `gpt-4o-mini` |
+| `HF_API_KEY` / `HF_MODEL` | For Hugging Face inference |
+| `OLLAMA_BASE_URL` / `OLLAMA_MODEL` | For local Ollama |
+
+### AI setup
+
+**OpenAI (default)**
+
+```env
+AI_PROVIDER=openai
+OPENAI_API_KEY=sk-your-key
+OPENAI_MODEL=gpt-4o-mini
 ```
 
-## API examples
+**Hugging Face**
 
-### Token insight
+```env
+AI_PROVIDER=huggingface
+HF_API_KEY=hf_your_token
+HF_MODEL=google/flan-t5-large
+```
+
+**Ollama (local)**
+
+```env
+AI_PROVIDER=ollama
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=llama3.2
+```
+
+Docker + Ollama on host: use `http://host.docker.internal:11434`.
+
+---
+
+## API 1 — Token Insight
+
+**`POST /api/token/:id/insight`**
+
+### Flow
+
+1. Fetch token from CoinGecko `GET /coins/{id}`
+2. Optional chart: `GET /coins/{id}/market_chart`
+3. Build prompt → call AI → parse JSON
+4. Validate `insight.reasoning` (string) and `insight.sentiment` (`Bullish` | `Bearish` | `Neutral`)
+5. Return combined JSON
+
+### Request body (optional)
+
+```json
+{
+  "vs_currency": "usd",
+  "history_days": 30
+}
+```
+
+### Example
 
 ```bash
-curl -X POST http://localhost:3000/api/token/bitcoin/insight ^
-  -H "Content-Type: application/json" ^
+curl -X POST http://localhost:3000/api/token/chainlink/insight \
+  -H "Content-Type: application/json" \
   -d "{\"vs_currency\":\"usd\",\"history_days\":30}"
 ```
 
-### HyperLiquid daily PnL
+### Example response
+
+```json
+{
+  "source": "coingecko",
+  "token": {
+    "id": "chainlink",
+    "symbol": "link",
+    "name": "Chainlink",
+    "market_data": {
+      "current_price_usd": 7.23,
+      "market_cap_usd": 3500000000,
+      "total_volume_usd": 120000000,
+      "price_change_percentage_24h": -1.2
+    }
+  },
+  "insight": {
+    "reasoning": "...",
+    "sentiment": "Neutral"
+  },
+  "model": {
+    "provider": "openai",
+    "model": "gpt-4o-mini"
+  }
+}
+```
+
+### Errors
+
+| Status | Cause |
+|--------|--------|
+| 404 | Unknown token id on CoinGecko |
+| 502 | CoinGecko / AI failure or invalid AI JSON |
+| 503 | AI provider not configured |
+
+---
+
+## API 2 — HyperLiquid daily PnL
+
+**`GET /api/hyperliquid/:wallet/pnl?start=YYYY-MM-DD&end=YYYY-MM-DD`**
+
+### Data sources (HyperLiquid `POST /info`)
+
+| Data | API type |
+|------|----------|
+| Trades / realized PnL / fees | `userFillsByTime` |
+| Funding | `userFunding` |
+| Daily close (unrealized MTM) | `candleSnapshot` (1d) |
+| Account value (equity baseline) | `clearinghouseState` |
+
+### Daily calculations (UTC)
+
+- **Realized PnL** — sum of `closedPnl` on fills that day  
+- **Fees** — sum of `fee` on fills that day  
+- **Funding** — sum of `delta.usdc` on funding events that day  
+- **Unrealized PnL** — day-over-day change in open-position mark-to-market (1d candle close)  
+- **Net PnL** = realized + unrealized − fees + funding  
+- **Equity** — rolls forward from `(current account value − period net PnL)`
+
+Fills up to **90 days before** `start` are loaded to reconstruct open positions.
+
+### Example
 
 ```bash
 curl "http://localhost:3000/api/hyperliquid/0xYOUR_WALLET/pnl?start=2025-08-01&end=2025-08-07"
 ```
 
-## AI configuration
+### Errors
 
-| Provider | Env vars |
-|----------|----------|
-| OpenAI (default) | `AI_PROVIDER=openai`, `OPENAI_API_KEY`, `OPENAI_MODEL` |
-| Ollama | `AI_PROVIDER=ollama`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL` |
+| Status | Cause |
+|--------|--------|
+| 400 | Invalid wallet or dates, or range > 90 days |
+| 404 | Wallet not on HyperLiquid |
+| 502 | HyperLiquid API error |
 
-Do not commit `.env`. Use `.env.example` as a template.
+---
 
-## PnL calculation notes
+## Postman
 
-- Days are **UTC** (`YYYY-MM-DD`).
-- **Realized** and **fees** come from `userFillsByTime` (`closedPnl`, `fee`).
-- **Funding** comes from `userFunding` (`delta.usdc`).
-- **Unrealized** is the day-over-day change in mark-to-market on open perp positions (1d candle close).
-- **Net PnL** = realized + unrealized − fees + funding.
-- Max date range: 90 days per request.
+1. Import `postman/token-analytics.postman_collection.json`
+2. Set `baseUrl` = `http://localhost:3000`
+3. Run **Health** → **Token Insight** → **HyperLiquid Daily PnL**
+
+---
 
 ## Tests
 
@@ -74,14 +212,37 @@ Do not commit `.env`. Use `.env.example` as a template.
 npm test
 ```
 
-## Project layout
+---
+
+## Project structure
 
 ```
 src/
-  index.js           # app entry
-  config.js          # env
-  clients/           # CoinGecko, HyperLiquid, AI
-  lib/               # dates, pnl math, validation
-  routes/            # HTTP handlers
+  index.js              Express app
+  config.js             Environment
+  clients/
+    coingecko.js        CoinGecko API
+    hyperliquid.js      HyperLiquid info API
+    ai.js               OpenAI / HF / Ollama
+  lib/
+    dates.js            Date parsing (UTC)
+    pnl.js              Daily PnL aggregation
+    format.js           Response rounding
+    validate.js         Wallet validation
+  routes/
+    token.js            POST /api/token/:id/insight
+    hyperliquid.js      GET /api/hyperliquid/:wallet/pnl
 tests/
+postman/
+Dockerfile
+docker-compose.yml
+```
+
+---
+
+## Health
+
+```bash
+curl http://localhost:3000/health
+# {"ok":true}
 ```

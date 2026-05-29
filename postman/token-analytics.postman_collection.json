@@ -1,12 +1,13 @@
 {
   "info": {
     "name": "Token Analytics API",
+    "description": "Assignment endpoints: Token Insight + HyperLiquid Daily PnL",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     { "key": "baseUrl", "value": "http://localhost:3000" },
-    { "key": "wallet", "value": "0x0000000000000000000000000000000000000001" },
-    { "key": "tokenId", "value": "bitcoin" }
+    { "key": "wallet", "value": "0x31ca8395cf837de08b24da3f660e77761dfb974b" },
+    { "key": "tokenId", "value": "chainlink" }
   ],
   "item": [
     {
@@ -17,7 +18,7 @@
       }
     },
     {
-      "name": "Token Insight",
+      "name": "Token Insight (chainlink)",
       "request": {
         "method": "POST",
         "header": [{ "key": "Content-Type", "value": "application/json" }],
